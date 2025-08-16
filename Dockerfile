@@ -26,6 +26,9 @@ RUN apt-get update && apt-get install -y \
 ENV CC=gcc
 ENV CXX=g++
 
+ENV OUTPUT_DIR=/workspace/output
+ENV INPUT_DIR=/workspace/input
+
 # Note: Models will be loaded from the mounted /workspace volume
 # Your /workspace/models directory should contain:
 # - checkpoints/     (main model files)
@@ -57,7 +60,7 @@ COPY extra_model_paths.yaml /opt/ComfyUI/extra_model_paths.yaml
 RUN pip install triton sageattention
 
 # Re-declare api_version ARG to ensure it's available for ADD
-ARG api_version=1.0.0
+ARG api_version=1.0.1
 
 # Download the comfyui-api binary
 ADD https://github.com/GangulyCo/comfyui-api/releases/download/${api_version}/comfyui-api .

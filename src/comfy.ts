@@ -29,6 +29,7 @@ export function launchComfyUI() {
   const cmdAndArgs = config.comfyLaunchCmd.split(" ");
   const cmd = cmdAndArgs[0];
   const args = cmdAndArgs.slice(1);
+  args.push('--output-directory', config.outputDir);
   return commandExecutor.execute(cmd, args, {
     DIRECT_ADDRESS: config.comfyHost,
     COMFYUI_PORT_HOST: config.comfyPort,

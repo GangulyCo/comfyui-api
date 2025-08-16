@@ -723,7 +723,7 @@ server.after(() => {
         }
         await Promise.all(uploadPromises);
 
-        return reply.send({ id, prompt, images, filenames });
+        return reply.send({ id, images, filenames });
       }
     }
   );
