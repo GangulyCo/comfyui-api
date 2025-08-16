@@ -1,0 +1,181 @@
+# Download Endpoints Documentation
+
+This document describes the download endpoints and updated `/prompt` endpoint behavior in the ComfyUI API that allow you to download and list output files.
+
+## Updated `/prompt` Endpoint Behavior
+
+**Important Change**: The `/prompt` endpoint has been updated to return file paths instead of base64 content in the `images` field when not using webhooks or S3. This allows you to use the `/download` endpoint to retrieve the actual files.
+
+### Previous Behavior
+```json
+{
+  "id": "12345",
+  "images": ["iVBORw0KGgoAAAANSUhEUgAA..."], // base64 content
+  "filenames": ["example_12345.png"]
+}
+```
+
+### New Behavior
+```json
+{
+  "id": "12345", 
+  "images": ["example_12345.png"], // filenames that can be used with /download
+  "filenames": ["example_12345.png"]
+}
+```
+
+**Benefits:**
+- Smaller response payloads (no large base64 strings)
+- Files remain on disk for later retrieval
+- Works seamlessly with both image and video outputs
+- Consistent API experience with the new download endpoints
+
+## Download Endpoints
+
+### GET /files
+
+Lists all available output files in the output directory.
+
+**Response:**
+```json
+{
+  "files": [
+    {
+      "name": "example_12345.png",
+      "size": 1024576,
+      "modified": "2025-08-16T10:30:00.000Z"
+    },
+    {
+      "name": "video_12345.mp4",
+      "size": 5242880,
+      "modified": "2025-08-16T10:35:00.000Z"
+    }
+  ]
+}
+```
+
+**Fields:**
+- `name`: The filename of the output file
+- `size`: File size in bytes
+- `modified`: ISO timestamp of when the file was last modified
+
+### GET /download/:filename
+
+Downloads a specific output file by its filename.
+
+**Parameters:**
+- `filename`: The name of the file to download (path parameter)
+
+**Response:**
+- **200**: Returns the file content with appropriate headers
+  - `Content-Type`: Automatically detected based on file extension
+  - `Content-Disposition`: Set to `attachment; filename="<filename>"`
+  - `Content-Length`: File size in bytes
+- **404**: File not found
+- **500**: Internal server error
+
+**Supported file types:**
+- Images: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`
+- Videos: `.mp4`, `.webm`, `.mov`
+- Other files: Served as `application/octet-stream`
+
+## Security Features
+
+### Path Traversal Protection
+The download endpoint includes protection against path traversal attacks. Requests like `/download/../../../etc/passwd` will return a 404 error.
+
+### File Validation
+- Only files within the configured output directory can be accessed
+- Only actual files (not directories) can be downloaded
+- File existence is verified before serving
+
+## Usage Examples
+
+### Complete Workflow: Generate and Download
+
+1. **Submit a prompt:**
+```bash
+curl -X POST http://localhost:3000/prompt \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": {...},
+    "id": "my-generation"
+  }'
+```
+
+2. **Response contains filenames:**
+```json
+{
+  "id": "my-generation",
+  "images": ["my-generation_00001_.png"],
+  "filenames": ["my-generation_00001_.png"]
+}
+```
+
+3. **Download the generated file:**
+```bash
+curl -O http://localhost:3000/download/my-generation_00001_.png
+```
+
+### List all available files
+```bash
+curl http://localhost:3000/files
+```
+
+### Download a specific file
+```bash
+curl -O http://localhost:3000/download/my_image_12345.png
+```
+
+### Download with wget
+```bash
+wget http://localhost:3000/download/my_video_12345.mp4
+```
+
+## Video Output Support
+
+The updated system fully supports video outputs from ComfyUI workflows:
+
+- Video files are handled the same way as images
+- Common video formats (MP4, WebM, MOV) are properly detected
+- Content-Type headers are set appropriately for video files
+- No conversion to base64 (which was problematic for large video files)
+
+## Integration with Existing Workflows
+
+These endpoints work seamlessly with the existing ComfyUI API workflows:
+
+1. Submit a prompt using `/prompt` endpoint
+2. Receive filenames in the response (not base64 content)
+3. Use `/files` to list all generated files (optional)
+4. Use `/download/:filename` to retrieve specific files
+
+## S3 and Webhook Behavior
+
+The changes only affect the direct response mode:
+
+- **Webhooks**: Still receive base64 content as before
+- **S3 uploads**: Still work as before, returning S3 URLs in the `images` field
+- **Direct response**: Now returns filenames instead of base64 content
+
+## Configuration
+
+The download endpoints use the same output directory configuration as the rest of the API:
+- `OUTPUT_DIR` environment variable
+- Defaults to `{COMFY_HOME}/output` if not specified
+
+## Error Handling
+
+All endpoints return appropriate HTTP status codes:
+- `200`: Success
+- `404`: File not found or path traversal attempt
+- `500`: Internal server error (file system issues, etc.)
+
+Error responses include a JSON object with an `error` field describing the issue.
+
+## File Lifecycle
+
+- **File Creation**: Generated by ComfyUI workflows
+- **File Conversion**: Applied if `convert_output` is specified
+- **File Storage**: Kept on disk for download (unless uploaded to S3)
+- **File Cleanup**: Original files are only removed when format conversion occurs

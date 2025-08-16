@@ -8,6 +8,7 @@ import {
   ZodTypeProvider,
 } from "fastify-type-provider-zod";
 import fsPromises from "fs/promises";
+import fs from "fs";
 import path from "path";
 import config from "./config";
 import {
@@ -174,6 +175,150 @@ server.after(() => {
     },
     async (request, reply) => {
       return modelResponse;
+    }
+  );
+
+  app.get<{
+    Params: { filename: string };
+  }>(
+    "/download/:filename",
+    {
+      schema: {
+        summary: "Download Output File",
+        description: "Download an output file by its filename.",
+        params: z.object({
+          filename: z.string().describe("The name of the file to download"),
+        }),
+        response: {
+          200: z.any().describe("The file content"),
+          404: z.object({
+            error: z.string(),
+          }),
+          500: z.object({
+            error: z.string(),
+          }),
+        },
+      },
+    },
+    async (request, reply) => {
+      const { filename } = request.params;
+      const filePath = path.join(config.outputDir, filename);
+
+      try {
+        // Check if file exists and is within the output directory
+        const resolvedPath = path.resolve(filePath);
+        const outputDirResolved = path.resolve(config.outputDir);
+        
+        if (!resolvedPath.startsWith(outputDirResolved)) {
+          return reply.code(404).send({
+            error: "File not found",
+          });
+        }
+
+        // Check if file exists
+        await fsPromises.access(filePath, fs.constants.F_OK);
+        
+        // Get file stats to determine content type
+        const stats = await fsPromises.stat(filePath);
+        if (!stats.isFile()) {
+          return reply.code(404).send({
+            error: "File not found",
+          });
+        }
+
+        // Determine content type based on file extension
+        const ext = path.extname(filename).toLowerCase();
+        let contentType = "application/octet-stream";
+        
+        if (ext === ".png") {
+          contentType = "image/png";
+        } else if (ext === ".jpg" || ext === ".jpeg") {
+          contentType = "image/jpeg";
+        } else if (ext === ".gif") {
+          contentType = "image/gif";
+        } else if (ext === ".webp") {
+          contentType = "image/webp";
+        } else if (ext === ".mp4") {
+          contentType = "video/mp4";
+        } else if (ext === ".webm") {
+          contentType = "video/webm";
+        } else if (ext === ".mov") {
+          contentType = "video/quicktime";
+        }
+
+        // Set headers
+        reply.header("Content-Type", contentType);
+        reply.header("Content-Disposition", `attachment; filename="${filename}"`);
+        reply.header("Content-Length", stats.size);
+
+        // Stream the file
+        const fileStream = fs.createReadStream(filePath);
+        return reply.send(fileStream);
+      } catch (error: any) {
+        if (error.code === "ENOENT") {
+          return reply.code(404).send({
+            error: "File not found",
+          });
+        }
+        
+        request.log.error(`Error downloading file ${filename}: ${error.message}`);
+        return reply.code(500).send({
+          error: "Internal server error",
+        });
+      }
+    }
+  );
+
+  app.get(
+    "/files",
+    {
+      schema: {
+        summary: "List Output Files",
+        description: "List all available output files in the output directory.",
+        response: {
+          200: z.object({
+            files: z.array(z.object({
+              name: z.string(),
+              size: z.number(),
+              modified: z.string(),
+            })),
+          }),
+          500: z.object({
+            error: z.string(),
+          }),
+        },
+      },
+    },
+    async (request, reply) => {
+      try {
+        const files = await fsPromises.readdir(config.outputDir);
+        const fileStats = await Promise.all(
+          files.map(async (filename) => {
+            const filePath = path.join(config.outputDir, filename);
+            try {
+              const stats = await fsPromises.stat(filePath);
+              if (stats.isFile()) {
+                return {
+                  name: filename,
+                  size: stats.size,
+                  modified: stats.mtime.toISOString(),
+                };
+              }
+              return null;
+            } catch {
+              return null;
+            }
+          })
+        );
+        
+        const validFiles = fileStats.filter((file): file is { name: string; size: number; modified: string } => file !== null);
+        return reply.send({ files: validFiles });
+      } catch (error: any) {
+        request.log.error(`Error listing files: ${error.message}`);
+        return reply.code(500).send({
+          error: "Internal server error",
+        });
+      }
     }
   );
 
@@ -547,25 +692,34 @@ server.after(() => {
                 /\.[^/.]+$/,
                 `.${convert_output.format}`
               );
+              
+              // Save the converted file back to disk
+              await fsPromises.writeFile(path.join(config.outputDir, filename), fileBuffer);
             } catch (e: any) {
               app.log.warn(`Failed to convert image: ${e.message}`);
+              filename = originalFilename; // Fall back to original filename if conversion fails
             }
           }
 
           filenames.push(filename);
           if (!s3) {
-            const base64File = fileBuffer.toString("base64");
-            images.push(base64File);
+            // Instead of base64 content, return the filename that can be used with /download endpoint
+            images.push(filename);
           } else if (s3 && !s3.async) {
             const key = `${s3.prefix}${filename}`;
             uploadPromises.push(
               uploadFileToS3(s3.bucket, key, fileBuffer, contentType, app.log)
             );
             images.push(`s3://${s3.bucket}/${key}`);
+            
+            // Remove the file after uploading to S3
+            fsPromises.unlink(path.join(config.outputDir, filename));
           }
 
-          // Remove the file after reading
-          fsPromises.unlink(path.join(config.outputDir, originalFilename));
+          // Only remove the original file if we converted it to a different format
+          if (convert_output && filename !== originalFilename) {
+            fsPromises.unlink(path.join(config.outputDir, originalFilename));
+          }
         }
         await Promise.all(uploadPromises);
 
