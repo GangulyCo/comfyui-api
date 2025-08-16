@@ -1,0 +1,60 @@
+name: Create Release
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build
+        run: npm run build-binary
+
+      - name: Get version from package.json
+        id: version
+        run: echo "version=$(jq -r .version package.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Get the title and body from the last merged PR
+        id: pr-output
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          info=$(gh pr list --state merged --limit 1 --json title,body | jq -r '.[0]')
+          {
+            echo 'title<<EOF'
+            echo $info | jq -r '.title'
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo 'body<<EOF'
+            echo $info | jq -r '.body'
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create a release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.version.outputs.version }}
+          release_name: ${{ steps.pr-output.outputs.title }}
+          body: ${{ steps.pr-output.outputs.body }}
+          draft: true
+          prerelease: false
+
+      - name: Upload release artifacts
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload ${{ steps.version.outputs.version }} ./bin/comfyui-api#Linux_x64
