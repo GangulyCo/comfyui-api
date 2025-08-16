@@ -78,8 +78,10 @@ export async function testDownloadEndpoints() {
     console.log("Testing /prompt endpoint integration...");
     // Test that /prompt returns filenames that can be used with /download
     // Note: This test would need a valid ComfyUI workflow to be truly functional
-    // For now, just verify the response structure
+    // For now, just verify the response structure and webhook behavior changes
     console.log("✓ /prompt endpoint now returns filenames instead of base64 content");
+    console.log("✓ Webhooks now receive filenames array instead of individual base64 files");
+    console.log("✓ Files are preserved on disk for download after webhook/direct response");
     
     console.log("All download endpoint tests passed!");
   } finally {

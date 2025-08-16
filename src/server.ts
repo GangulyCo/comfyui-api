@@ -505,6 +505,8 @@ server.after(() => {
              * This function does not block returning the 202 response to the user.
              */
             async (outputs: Record<string, Buffer>) => {
+              const filenames: string[] = [];
+              
               for (const originalFilename in outputs) {
                 let filename = originalFilename;
                 let fileBuffer = outputs[filename];
@@ -522,59 +524,66 @@ server.after(() => {
                       /\.[^/.]+$/,
                       `.${convert_output.format}`
                     );
+                    
+                    // Save the converted file back to disk
+                    await fsPromises.writeFile(path.join(config.outputDir, filename), fileBuffer);
                   } catch (e: any) {
                     app.log.warn(`Failed to convert image: ${e.message}`);
+                    filename = originalFilename; // Fall back to original filename if conversion fails
                   }
                 }
-                const base64File = fileBuffer.toString("base64");
-                app.log.info(
-                  `Sending image ${filename} to webhook: ${webhook}`
-                );
-                fetchWithRetries(
-                  webhook,
-                  {
-                    method: "POST",
-                    headers: {
-                      "Content-Type": "application/json",
-                    },
-                    body: JSON.stringify({
-                      event: "output.complete",
-                      image: base64File,
-                      id,
-                      filename,
-                      prompt,
-                    }),
-                    dispatcher: new Agent({
-                      headersTimeout: 0,
-                      bodyTimeout: 0,
-                      connectTimeout: 0,
-                    }),
-                  },
-                  config.promptWebhookRetries,
-                  app.log
-                )
-                  .catch((e: any) => {
-                    app.log.error(
-                      `Failed to send image to webhook: ${e.message}`
-                    );
-                  })
-                  .then(async (resp) => {
-                    if (!resp) {
-                      app.log.error("No response from webhook");
-                    } else if (!resp.ok) {
-                      app.log.error(
-                        `Failed to send image ${filename}: ${await resp.text()}`
-                      );
-                    } else {
-                      app.log.info(`Sent image ${filename}`);
-                    }
-                  });
-
-                // Remove the file after sending
-                fsPromises.unlink(
-                  path.join(config.outputDir, originalFilename)
-                );
+                
+                filenames.push(filename);
+                
+                // Only remove the original file if we converted it to a different format
+                if (convert_output && filename !== originalFilename) {
+                  fsPromises.unlink(path.join(config.outputDir, originalFilename));
+                }
               }
+              
+              // Send webhook with filenames instead of base64 content
+              app.log.info(
+                `Sending ${filenames.length} filename(s) to webhook: ${webhook}`
+              );
+              
+              fetchWithRetries(
+                webhook,
+                {
+                  method: "POST",
+                  headers: {
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({
+                    event: "output.complete",
+                    filenames,
+                    id,
+                    prompt,
+                  }),
+                  dispatcher: new Agent({
+                    headersTimeout: 0,
+                    bodyTimeout: 0,
+                    connectTimeout: 0,
+                  }),
+                },
+                config.promptWebhookRetries,
+                app.log
+              )
+                .catch((e: any) => {
+                  app.log.error(
+                    `Failed to send filenames to webhook: ${e.message}`
+                  );
+                })
+                .then(async (resp) => {
+                  if (!resp) {
+                    app.log.error("No response from webhook");
+                  } else if (!resp.ok) {
+                    app.log.error(
+                      `Failed to send filenames to webhook: ${await resp.text()}`
+                    );
+                  } else {
+                    app.log.info(`Sent ${filenames.length} filename(s) to webhook`);
+                  }
+                });
             }
           )
           .catch(async (e: any) => {

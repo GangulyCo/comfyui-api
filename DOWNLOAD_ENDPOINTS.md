@@ -4,9 +4,30 @@ This document describes the download endpoints and updated `/prompt` endpoint be
 
 ## Updated `/prompt` Endpoint Behavior
 
-**Important Change**: The `/prompt` endpoint has been updated to return file paths instead of base64 content in the `images` field when not using webhooks or S3. This allows you to use the `/download` endpoint to retrieve the actual files.
+**Important Change**: The `/prompt` endpoint has been updated to return file paths instead of base64 content in both direct responses and webhook notifications. This allows you to use the `/download` endpoint to retrieve the actual files in all cases.
 
-### Previous Behavior
+### Previous Webhook Behavior
+```json
+{
+  "event": "output.complete",
+  "image": "iVBORw0KGgoAAAANSUhEUgAA...", // base64 content
+  "filename": "example_12345.png",
+  "id": "12345",
+  "prompt": {...}
+}
+```
+
+### New Webhook Behavior
+```json
+{
+  "event": "output.complete", 
+  "filenames": ["example_12345.png", "example_12345_2.png"],
+  "id": "12345",
+  "prompt": {...}
+}
+```
+
+### Previous Direct Response Behavior
 ```json
 {
   "id": "12345",
@@ -15,7 +36,7 @@ This document describes the download endpoints and updated `/prompt` endpoint be
 }
 ```
 
-### New Behavior
+### New Direct Response Behavior
 ```json
 {
   "id": "12345", 
@@ -28,7 +49,8 @@ This document describes the download endpoints and updated `/prompt` endpoint be
 - Smaller response payloads (no large base64 strings)
 - Files remain on disk for later retrieval
 - Works seamlessly with both image and video outputs
-- Consistent API experience with the new download endpoints
+- Consistent API experience across all delivery methods
+- Better support for multiple outputs (webhooks now send all filenames at once)
 
 ## Download Endpoints
 
@@ -152,11 +174,69 @@ These endpoints work seamlessly with the existing ComfyUI API workflows:
 
 ## S3 and Webhook Behavior
 
-The changes only affect the direct response mode:
+The changes affect webhook behavior as well:
 
-- **Webhooks**: Still receive base64 content as before
+- **Webhooks**: Now receive filenames instead of base64 content
+  ```json
+  {
+    "event": "output.complete",
+    "filenames": ["file1.png", "file2.png"],
+    "id": "12345",
+    "prompt": {...}
+  }
+  ```
 - **S3 uploads**: Still work as before, returning S3 URLs in the `images` field
-- **Direct response**: Now returns filenames instead of base64 content
+- **Direct response**: Returns filenames instead of base64 content
+
+### Webhook Payload Format
+
+**Success webhook:**
+```json
+{
+  "event": "output.complete",
+  "filenames": ["example_12345.png", "example_12345_video.mp4"],
+  "id": "12345",
+  "prompt": {...}
+}
+```
+
+**Failure webhook:**
+```json
+{
+  "event": "prompt.failed",
+  "id": "12345", 
+  "prompt": {...},
+  "error": "Error message"
+}
+```
+
+### Webhook Integration Pattern
+
+1. **Set up webhook endpoint** to receive filename notifications:
+```javascript
+app.post('/webhook', (req, res) => {
+  const { event, filenames, id } = req.body;
+  if (event === 'output.complete') {
+    // Download files using the filenames
+    for (const filename of filenames) {
+      downloadFile(`http://comfyui-api:3000/download/${filename}`);
+    }
+  }
+  res.sendStatus(200);
+});
+```
+
+2. **Submit prompt with webhook:**
+```bash
+curl -X POST http://localhost:3000/prompt \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": {...},
+    "webhook": "https://your-app.com/webhook"
+  }'
+```
+
+3. **Receive webhook notification** with filenames and download as needed
 
 ## Configuration
 

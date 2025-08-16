@@ -139,7 +139,7 @@ export type PromptRequest = z.infer<typeof PromptRequestSchema>;
 
 export const PromptResponseSchema = z.object({
   id: z.string(),
-  prompt: z.record(ComfyNodeSchema),
+  // prompt: z.record(ComfyNodeSchema),
   images: z.array(z.string()).optional().describe("Array of filenames that can be downloaded using the /download endpoint, or S3 URLs if S3 is configured"),
   filenames: z.array(z.string()).optional().describe("Array of generated filenames"),
   webhook: z.string().optional(),
