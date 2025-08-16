@@ -60,7 +60,7 @@ COPY extra_model_paths.yaml /opt/ComfyUI/extra_model_paths.yaml
 RUN pip install triton sageattention
 
 # Re-declare api_version ARG to ensure it's available for ADD
-ARG api_version=1.0.3
+ARG api_version=1.0.4
 
 # Download the comfyui-api binary
 ADD https://github.com/GangulyCo/comfyui-api/releases/download/${api_version}/comfyui-api .

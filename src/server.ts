@@ -557,7 +557,6 @@ server.after(() => {
                     event: "output.complete",
                     filenames,
                     id,
-                    prompt,
                   }),
                   dispatcher: new Agent({
                     headersTimeout: 0,
